@@ -12,15 +12,14 @@
 #include <cstddef>
 #include <cstdlib>
 #include <ctime>
-#include <optional>
 #include <stdio.h>
+#include <tuple>
 #include <vector>
 
 #define SW 640
 #define SH 480
 #define CELL_DIM 10
-#define SCREEN_FPS 30
-#define SCREEN_TICK_PER_FRAME (1000 / SCREEN_FPS)
+#define SCREEN_TICK_PER_FRAME 100
 #define GRID_SIZE ((SW / CELL_DIM) * (SH / CELL_DIM) - 1)
 
 SDL_Window *win = NULL;
@@ -28,15 +27,17 @@ SDL_Renderer *rend = NULL;
 
 class Grid {
 private:
-  size_t rows;
-  size_t columns;
-  std::vector<std::optional<SDL_Rect>> points;
+  int rows;
+  int columns;
+  std::vector<int> points;
 
   bool exists(int x, int y);
-  bool can_move(SDL_Rect rect);
+  bool can_move(int idx);
   void create_random_point();
   void spawn_at(int x, int y);
+  SDL_Rect create_rect(int x, int y);
   size_t into_grid_index(int x, int y);
+  std::tuple<int, int> coords(int idx);
 
 public:
   Grid(size_t r, size_t c, int pts);
@@ -44,37 +45,45 @@ public:
   void render();
 };
 
-size_t Grid::into_grid_index(int x, int y) { return x * columns + y; }
-
-bool Grid::exists(int x, int y) {
-  return points[into_grid_index(x, y)].has_value();
-}
-
-bool Grid::can_move(SDL_Rect rect) { return rect.y < SH - CELL_DIM; }
-
-void Grid::spawn_at(int idx_x, int idx_y) {
-  SDL_Log("Spawining CELL {X: %d, Y: %d}", idx_x, idx_y);
-  points[into_grid_index(idx_x, idx_y)] = {
-      .x = idx_x * CELL_DIM,
-      .y = idx_y * CELL_DIM,
+SDL_Rect Grid::create_rect(int x, int y) {
+  return {
+      .x = x * CELL_DIM,
+      .y = y * CELL_DIM,
       .w = CELL_DIM,
       .h = CELL_DIM,
   };
+};
+
+std::tuple<int, int> Grid::coords(int idx) {
+  return std::make_tuple(idx % columns, idx / columns);
+}
+size_t Grid::into_grid_index(int x, int y) { return x * columns + y; }
+
+bool Grid::exists(int x, int y) { return points[into_grid_index(x, y)] != 0; }
+
+bool Grid::can_move(int idx) {
+  auto [_, y] = coords(idx);
+  return y < rows - 1 && points[idx + columns] == 0;
+}
+
+void Grid::spawn_at(int idx_x, int idx_y) {
+  SDL_Log("Spawining CELL {X: %d, Y: %d}", idx_x, idx_y);
+  points[into_grid_index(idx_x, idx_y)] = 1;
 }
 
 void Grid::create_random_point() {
-  int cell_y = std::floor((rand() % (SH / 3)) / CELL_DIM);
-  int cell_x = std::floor((rand() % SW) / CELL_DIM);
+  int cell_y = std::floor((rand() % SW) / CELL_DIM);
+  int cell_x = std::floor((rand() % SH) / CELL_DIM);
 
   while (exists(cell_x, cell_y)) {
-    cell_y = std::floor((rand() % (SH / 3)) / CELL_DIM);
-    cell_x = std::floor((rand() % SW) / CELL_DIM);
+    cell_y = std::floor((rand() % SW) / CELL_DIM);
+    cell_x = std::floor((rand() % SH) / CELL_DIM);
   }
 
   spawn_at(cell_x, cell_y);
 };
 
-Grid::Grid(size_t r, size_t c, int pts = 10)
+Grid::Grid(size_t r, size_t c, int pts = 1000)
     : rows(r), columns(c), points(r * c) {
   std::srand(std::time(0));
 
@@ -87,21 +96,31 @@ void Grid::render() {
   SDL_SetRenderDrawColor(rend, 0xFF, 0xFF, 0xFF, 0xFF);
   SDL_RenderClear(rend);
 
-  SDL_SetRenderDrawColor(rend, 240, 20, 19, 0);
-  for (auto p : points) {
-    if (!p.has_value())
+  for (int i = 0; i < points.size(); i++) {
+    if (points[i] == 0)
       continue;
-    SDL_RenderFillRect(rend, &p.value());
+
+    auto [x, y] = coords(i);
+    const auto r = create_rect(x, y);
+
+    SDL_SetRenderDrawColor(rend, 240, 20, 19, 0);
+    SDL_RenderFillRect(rend, &r);
   }
+
   SDL_RenderPresent(rend);
 }
 
 void Grid::update() {
-  for (auto &p : points) {
-    if (!p.has_value() || !can_move(p.value()))
-      continue;
+  for (int i = 0; i < points.size(); i++) {
+    const auto p = points[i];
 
-    p->y += CELL_DIM;
+    if (p == 0 || !can_move(i)) {
+      points[i] = p;
+      continue;
+    }
+
+    points[i] = 0;
+    points[i + columns] = p;
   }
 }
 
